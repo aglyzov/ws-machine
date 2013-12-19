@@ -30,8 +30,10 @@ const (
 )
 const (
 	// commands
-	QUIT byte = 16 + iota
+	QUIT       byte = 16 + iota
 	PING
+	USE_TEXT
+	USE_BINARY
 )
 
 func New(url string, headers http.Header) *WSChan {
@@ -45,7 +47,7 @@ func New(url string, headers http.Header) *WSChan {
 
 	r_error_ch    := make(chan error, 1)
 	w_error_ch    := make(chan error, 1)
-	w_control_ch  := make(chan bool,  1)
+	w_control_ch  := make(chan byte,  1)
 
 	io_event_ch   := make(chan bool, 2)
 
@@ -91,7 +93,7 @@ func New(url string, headers http.Header) *WSChan {
 				timer.Reset(dur)
 				// non-blocking PING request
 				select {
-				case w_control_ch <- true:
+				case w_control_ch <- PING:
 				default:
 				}
 			}
@@ -108,7 +110,7 @@ func New(url string, headers http.Header) *WSChan {
 			}
 		}
 	}
-	write := func(conn *ws.Conn) {
+	write := func(conn *ws.Conn, msg_type int) {
 		loop:
 		for {
 			select {
@@ -119,7 +121,7 @@ func New(url string, headers http.Header) *WSChan {
 						w_error_ch <- err
 						break loop
 					}
-					if err := conn.WriteMessage(ws.BinaryMessage, msg); err != nil {
+					if err := conn.WriteMessage(msg_type, msg); err != nil {
 						w_error_ch <- err
 						break loop
 					}
@@ -128,19 +130,25 @@ func New(url string, headers http.Header) *WSChan {
 					w_error_ch <- errors.New("out_ch closed")
 					break loop
 				}
-			case ping, ok := <-w_control_ch:
-				if ok && ping {
-					if err := conn.WriteControl(ws.PingMessage, []byte{}, time.Now().Add(3*time.Second)); err != nil {
+			case cmd, ok := <-w_control_ch:
+				if !ok {
+					w_error_ch <- errors.New("w_control_ch closed")
+					break loop
+				} else {
+					switch cmd {
+					case QUIT:
 						w_error_ch <- errors.New("cancelled")
 						break loop
+					case PING:
+						if err := conn.WriteControl(ws.PingMessage, []byte{}, time.Now().Add(3*time.Second)); err != nil {
+							w_error_ch <- errors.New("cancelled")
+							break loop
+						}
+					case USE_TEXT:
+						msg_type = ws.TextMessage
+					case USE_BINARY:
+						msg_type = ws.BinaryMessage
 					}
-				} else {
-					if ok {
-						w_error_ch <- errors.New("cancelled")
-					} else {
-						w_error_ch <- errors.New("w_control_ch closed")
-					}
-					break loop
 				}
 			}
 		}
@@ -149,8 +157,9 @@ func New(url string, headers http.Header) *WSChan {
 	go func() {
 		// local state
 		var conn *ws.Conn
-		reading	:= false
-		writing := false
+		reading	 := false
+		writing  := false
+		msg_type := ws.BinaryMessage  // use Binary messages by default
 
 		defer func() {
 			if conn != nil {conn.Close()}  // this also makes reader to exit
@@ -198,14 +207,14 @@ func New(url string, headers http.Header) *WSChan {
 					break main_loop
 				}
 				reading = true; go read(conn)
-				writing = true; go write(conn)
+				writing = true; go write(conn, msg_type)
 
 			case err := <-r_error_ch:
 				reading = false
 				if writing {
 					// write goroutine is still active
 					sts_ch <- Status{DISCONNECTED, err}
-					w_control_ch <- false  // ask write to exit
+					w_control_ch <- QUIT  // ask write to exit
 				} else {
 					// both read and write goroutines have exited
 					if conn != nil {
@@ -229,16 +238,19 @@ func New(url string, headers http.Header) *WSChan {
 					go connect()
 				}
 			case cmd, ok := <-cmd_ch:
-				if !ok || cmd == QUIT {
-					if reading || writing || conn != nil {
-						sts_ch <- Status{DISCONNECTED, errors.New("quit")}
-					}
+				switch {
+				case !ok || cmd == QUIT:
+					if reading || writing || conn != nil {sts_ch <- Status{DISCONNECTED, nil}}
 					break main_loop  // defer should clean everything up
-				} else if cmd == PING {
-					if conn != nil && writing {
-						w_control_ch <- true
-					}
-				} else {
+				case cmd == PING:
+					if conn != nil && writing {w_control_ch <- cmd}
+				case cmd == USE_TEXT:
+					msg_type = ws.TextMessage
+					if writing {w_control_ch <- cmd}
+				case cmd == USE_BINARY:
+					msg_type = ws.BinaryMessage
+					if writing {w_control_ch <- cmd}
+				default:
 					panic(fmt.Sprintf("unsupported command: %v", cmd))
 				}
 			}
