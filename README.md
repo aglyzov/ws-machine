@@ -48,6 +48,7 @@ for {
 }
 ```
 
+See more examples [here](http://github.com/aglyzov/wschan/tree/master/examples).
 
 
 [![Bitdeli Badge](https://d2weczhvl823v0.cloudfront.net/aglyzov/wschan/trend.png)](https://bitdeli.com/free "Bitdeli Badge")
