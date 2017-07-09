@@ -2,12 +2,15 @@ package wschan
 
 import (
 	"io"
+	"os"
 	"time"
 	"bytes"
 	"testing"
 	"net/http"
 	"net/http/httptest"
+
 	"github.com/gorilla/websocket"
+	"github.com/aglyzov/log15"
 )
 
 // --- utils ---
@@ -41,6 +44,19 @@ func (t *echoHandler) ServeHTTP(ans http.ResponseWriter, req *http.Request) {
 
 func http_to_ws(u string) string {
 	return "ws" + u[len("http"):]
+}
+
+// --- setup ---
+func TestMain(m *testing.M) {
+	var LogHandler = log15.StreamHandler(os.Stderr, log15.TerminalFormat())
+
+	if _, ok := os.LookupEnv("DEBUG"); ! ok {
+		LogHandler = log15.LvlFilterHandler(log15.LvlInfo, LogHandler)
+	}
+
+	Log.SetHandler(LogHandler)
+
+	os.Exit(m.Run())
 }
 
 // --- test cases ---

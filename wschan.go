@@ -85,6 +85,8 @@ func New(url string, headers http.Header) *WSChan {
 		wg.Add(1)
 		defer wg.Done()
 
+		Log.Debug("connect has started")
+
 		for {
 			sts_ch <- Status{State:CONNECTING}
 			dialer := websocket.Dialer{HandshakeTimeout: 5*time.Second}
@@ -95,6 +97,7 @@ func New(url string, headers http.Header) *WSChan {
 				sts_ch <- Status{State:CONNECTED}
 				return
 			} else {
+				Log.Debug("connect error", "err", err)
 				sts_ch <- Status{DISCONNECTED, err}
 			}
 
@@ -110,6 +113,8 @@ func New(url string, headers http.Header) *WSChan {
 	keep_alive := func() {
 		wg.Add(1)
 		defer wg.Done()
+
+		Log.Debug("keep_alive has started")
 
 		dur   := 34 * time.Second
 		timer := time.NewTimer(dur)
@@ -139,11 +144,15 @@ func New(url string, headers http.Header) *WSChan {
 		wg.Add(1)
 		defer wg.Done()
 
+		Log.Debug("read has started")
+
 		for {
 			if _, msg, err := conn.ReadMessage(); err == nil {
+				Log.Debug("received message", "msg", string(msg))
 				io_event_ch <- true
 				inp_ch <- msg
 			} else {
+				Log.Debug("read error", "err", err)
 				r_error_ch <- err
 				break
 			}
@@ -152,6 +161,8 @@ func New(url string, headers http.Header) *WSChan {
 	write := func(conn *websocket.Conn, msg_type int) {
 		wg.Add(1)
 		defer wg.Done()
+
+		Log.Debug("write has started")
 
 		loop:
 		for {
@@ -169,6 +180,7 @@ func New(url string, headers http.Header) *WSChan {
 					}
 					conn.SetWriteDeadline(time.Time{})  // reset write deadline
 				} else {
+					Log.Debug("write error", "err", "out_ch closed")
 					w_error_ch <- errors.New("out_ch closed")
 					break loop
 				}
@@ -179,10 +191,12 @@ func New(url string, headers http.Header) *WSChan {
 				} else {
 					switch cmd {
 					case QUIT:
+						Log.Debug("write received QUIT command")
 						w_error_ch <- errors.New("cancelled")
 						break loop
 					case PING:
 						if err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(3*time.Second)); err != nil {
+							Log.Debug("ping error", "err", err)
 							w_error_ch <- errors.New("cancelled")
 							break loop
 						}
@@ -204,6 +218,7 @@ func New(url string, headers http.Header) *WSChan {
 		msg_type := websocket.BinaryMessage  // use Binary messages by default
 
 		defer func() {
+			Log.Debug("cleanup has started")
 			if conn != nil {conn.Close()}  // this also makes reader to exit
 
 			// close local output channels
@@ -241,6 +256,8 @@ func New(url string, headers http.Header) *WSChan {
 			close(sts_ch)
 		}()
 
+		Log.Debug("main loop has started")
+
 		go connect()
 		go keep_alive()
 
@@ -253,15 +270,18 @@ func New(url string, headers http.Header) *WSChan {
 				}
 				reading = true; go read(conn)
 				writing = true; go write(conn, msg_type)
+				Log.Debug("connected", "local", conn.LocalAddr(), "remote", conn.RemoteAddr())
 
 			case err := <-r_error_ch:
 				reading = false
 				if writing {
 					// write goroutine is still active
 					sts_ch <- Status{DISCONNECTED, err}
+					Log.Debug("read error -> stopping write")
 					w_control_ch <- QUIT  // ask write to exit
 				} else {
 					// both read and write goroutines have exited
+					Log.Debug("read error -> starting connect()")
 					if conn != nil {
 						conn.Close()
 						conn = nil
@@ -274,15 +294,20 @@ func New(url string, headers http.Header) *WSChan {
 				if reading {
 					// read goroutine is still active
 					sts_ch <- Status{DISCONNECTED, err}
+					Log.Debug("write error -> stopping read")
 					if conn != nil {
 						conn.Close()  // this also makes read to exit
 						conn = nil
 					}
 				} else {
 					// both read and write goroutines have exited
+					Log.Debug("write error -> starting connect()")
 					go connect()
 				}
 			case cmd, ok := <-cmd_ch:
+				if ok {
+					Log.Debug("received command", "cmd", cmd)
+				}
 				switch {
 				case !ok || cmd == QUIT:
 					if reading || writing || conn != nil {sts_ch <- Status{DISCONNECTED, nil}}
