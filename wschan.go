@@ -5,11 +5,13 @@ import (
 	"time"
 	"errors"
 	"net/http"
-	ws "github.com/gorilla/websocket"
+
+	"github.com/gorilla/websocket"
 	"github.com/aglyzov/log15"
 )
 
 var Log = log15.New("pkg", "wschan")
+
 type State   byte
 type Command byte
 
@@ -67,7 +69,7 @@ func New(url string, headers http.Header) *WSChan {
 	sts_ch := make(chan Status,  2)
 	cmd_ch := make(chan Command, 2)
 
-	con_return_ch := make(chan *ws.Conn, 1)
+	con_return_ch := make(chan *websocket.Conn, 1)
 	con_cancel_ch := make(chan bool,     1)
 
 	r_error_ch    := make(chan error,    1)
@@ -80,7 +82,7 @@ func New(url string, headers http.Header) *WSChan {
 	connect := func() {
 		for {
 			sts_ch <- Status{State:CONNECTING}
-			dialer := ws.Dialer{HandshakeTimeout: 5*time.Second}
+			dialer := websocket.Dialer{HandshakeTimeout: 5*time.Second}
 			conn, _, err := dialer.Dial(url, headers)
 			if err == nil {
 				conn.SetPongHandler(func(string) error {io_event_ch <- true; return nil})
@@ -125,7 +127,7 @@ func New(url string, headers http.Header) *WSChan {
 			}
 		}
 	}
-	read := func(conn *ws.Conn) {
+	read := func(conn *websocket.Conn) {
 		for {
 			if _, msg, err := conn.ReadMessage(); err == nil {
 				io_event_ch <- true
@@ -136,7 +138,7 @@ func New(url string, headers http.Header) *WSChan {
 			}
 		}
 	}
-	write := func(conn *ws.Conn, msg_type int) {
+	write := func(conn *websocket.Conn, msg_type int) {
 		loop:
 		for {
 			select {
@@ -166,14 +168,14 @@ func New(url string, headers http.Header) *WSChan {
 						w_error_ch <- errors.New("cancelled")
 						break loop
 					case PING:
-						if err := conn.WriteControl(ws.PingMessage, []byte{}, time.Now().Add(3*time.Second)); err != nil {
+						if err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(3*time.Second)); err != nil {
 							w_error_ch <- errors.New("cancelled")
 							break loop
 						}
 					case USE_TEXT:
-						msg_type = ws.TextMessage
+						msg_type = websocket.TextMessage
 					case USE_BINARY:
-						msg_type = ws.BinaryMessage
+						msg_type = websocket.BinaryMessage
 					}
 				}
 			}
@@ -182,10 +184,10 @@ func New(url string, headers http.Header) *WSChan {
 
 	go func() {
 		// local state
-		var conn *ws.Conn
+		var conn *websocket.Conn
 		reading	 := false
 		writing  := false
-		msg_type := ws.BinaryMessage  // use Binary messages by default
+		msg_type := websocket.BinaryMessage  // use Binary messages by default
 
 		defer func() {
 			if conn != nil {conn.Close()}  // this also makes reader to exit
@@ -271,10 +273,10 @@ func New(url string, headers http.Header) *WSChan {
 				case cmd == PING:
 					if conn != nil && writing {w_control_ch <- cmd}
 				case cmd == USE_TEXT:
-					msg_type = ws.TextMessage
+					msg_type = websocket.TextMessage
 					if writing {w_control_ch <- cmd}
 				case cmd == USE_BINARY:
-					msg_type = ws.BinaryMessage
+					msg_type = websocket.BinaryMessage
 					if writing {w_control_ch <- cmd}
 				default:
 					panic(fmt.Sprintf("unsupported command: %v", cmd))
