@@ -3,6 +3,7 @@ package wschan
 import (
 	"fmt"
 	"time"
+	"sync"
 	"errors"
 	"net/http"
 
@@ -78,8 +79,12 @@ func New(url string, headers http.Header) *WSChan {
 
 	io_event_ch   := make(chan bool,     2)
 
+	var wg sync.WaitGroup
 
 	connect := func() {
+		wg.Add(1)
+		defer wg.Done()
+
 		for {
 			sts_ch <- Status{State:CONNECTING}
 			dialer := websocket.Dialer{HandshakeTimeout: 5*time.Second}
@@ -103,6 +108,9 @@ func New(url string, headers http.Header) *WSChan {
 		}
 	}
 	keep_alive := func() {
+		wg.Add(1)
+		defer wg.Done()
+
 		dur   := 34 * time.Second
 		timer := time.NewTimer(dur)
 		timer.Stop()
@@ -128,6 +136,9 @@ func New(url string, headers http.Header) *WSChan {
 		}
 	}
 	read := func(conn *websocket.Conn) {
+		wg.Add(1)
+		defer wg.Done()
+
 		for {
 			if _, msg, err := conn.ReadMessage(); err == nil {
 				io_event_ch <- true
@@ -139,6 +150,9 @@ func New(url string, headers http.Header) *WSChan {
 		}
 	}
 	write := func(conn *websocket.Conn, msg_type int) {
+		wg.Add(1)
+		defer wg.Done()
+
 		loop:
 		for {
 			select {
@@ -218,6 +232,9 @@ func New(url string, headers http.Header) *WSChan {
 					break drain_loop
 				}
 			}
+
+			// wait for all goroutines to stop
+			wg.Wait()
 
 			// close output channels
 			close(inp_ch)
