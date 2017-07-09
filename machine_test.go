@@ -1,4 +1,4 @@
-package wschan
+package machine
 
 import (
 	"io"

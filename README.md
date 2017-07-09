@@ -1,55 +1,82 @@
-WSChan (Go language)
-====================
+WS-Machine
+==========
 
-**WSChan** allows you to interact with a client Websocket connection via 4 channels:
-**Input**, **Output**, **Status** and **Command**.
+**WS-Machine** is a finite state machine for client websocket connections for [Go](http://golang.org).
+A caller just needs to provide a websocket URL and after that the state machine
+takes care of the connection. I.e. it connects to the server, reads/writes
+websocket messages, keeps the connection alive with pings, reconnects when the
+connection closes, waits when a connection attempt fails, etc.
 
-Essentially it is a state machine that creates a [gorilla/websocket](http://github.com/gorilla/websocket) connection,
-keeps it alive with PING messages, re-connects if necessary and lets you
-send/receive messages via non-blocking channels (as opposed to the blocking
-ReadMessage/WriteMessage interface).
+Moreover it is fully asynchronous, the caller communicates with a machine via
+4 Go channels:
 
-Thus you can integrate your Websocket IO into a single select loop with timers,
-other channels, you name it.
+- `Input` is used to receive `[]byte` messages from a websocket server;
+- `Output` is for sending `[]byte` messages to a websocket server;
+- `Status` lets the user know when the machine state changes;
+- `Command` allows the user to control the state machine.
 
-There are four possible states: **CONNECTING**, **CONNECTED**, **DISCONNECTED**
-and **WAITING**.
-The state machine switches to the WAITING state when a connection attempt fails.
-After 34 seconds it will try again switching to the CONNECTING state.
+Every machine has 4 states:
 
-**Input** and **Output** channels transmit **[]byte** sequences.
+- `CONNECTING` is when it attempts to connect to a remote server;
+- `CONNECTED` means the connection has been established;
+- `DISCONNECTED` should be obvious;
+- `WAITING` triggers after a failed attempt to connect when the machine makes a pause before the next retry.
 
-**Status** channel transmits **Status structs** which consist of two fields: **{State byte, Error error}**
+Because everything is done via Go channels it is now possible to integrate
+multiple websockets with timers, other channes and network connections
+in a single `select` loop. Thus avoiding possible dead-locks, complex logic and
+making the code simple, readable, clear and easy to modify/support. As they say **Make websockets great again!**
 
-In order to shutdown the state machine one either closes the **Command** channel
-or sends **wschan.QUIT** command.
+Under the hood the library uses [gorilla/websocket](http://github.com/gorilla/websocket) to handle raw websocket connections.
+
+In order to shutdown a running FSM a user should either close the `Command` channel
+or send the `machine.QUIT` command.
+
+By default new FSM use the *binary message format* to communicate with a server. Some
+websocket server implementations do not support those. In such cases one might switch the machine
+to the *text message format* by sending the `machine.USE_TEXT` command.
 
 Example
 -------
 ```go
-ws := wschan.New("ws://echo.websocket.org", http.Header{})
+// A stateful client for ws://echo.websocket.org
+package main
 
-loop:
-for {
-    select {
-    case st, ok := <-ws.Status:
-        if ok && st.State == wschan.CONNECTED {
-            fmt.Println("CONNECTED")
-            ws.Output <- []byte("test message")
-        }
-    case msg, ok := <-ws.Input:
-        if ok {
-            fmt.Println(string(msg))
-            ws.Command <- wschan.QUIT
-        } else {
-            break loop
-        }
-    }
+import (
+    "fmt"
+    "net/http"
+    "github.com/aglyzov/ws-machine"
+)
+
+func main() {
+	wsm := machine.New("ws://echo.websocket.org", http.Header{})
+	fmt.Println("URL:  ", wsm.URL)
+
+	loop:
+	for {
+		select {
+		case st, _ := <-wsm.Status:
+			fmt.Println("STATE:", st.State)
+			if st.Error != nil {
+				fmt.Println(st.Error)
+			}
+			switch st.State {
+			case machine.CONNECTED:
+				msg := "test message"
+				wsm.Output <- []byte(msg)
+				fmt.Println("SENT: ", msg)
+			case machine.DISCONNECTED:
+				break loop
+			}
+		case msg, ok := <-wsm.Input:
+			if ok {
+				fmt.Println("RECV: ", string(msg))
+				wsm.Command <- machine.QUIT
+			}
+		}
+	}
 }
 ```
 
-See more examples [here](http://github.com/aglyzov/wschan/tree/master/examples).
-
-
-[![Bitdeli Badge](https://d2weczhvl823v0.cloudfront.net/aglyzov/wschan/trend.png)](https://bitdeli.com/free "Bitdeli Badge")
+See more [examples](http://github.com/aglyzov/wschan/tree/master/examples).
 

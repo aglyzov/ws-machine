@@ -1,4 +1,4 @@
-package wschan
+package machine
 
 import (
 	"fmt"
@@ -11,13 +11,15 @@ import (
 	"github.com/aglyzov/log15"
 )
 
-var Log = log15.New("pkg", "wschan")
+var Log = log15.New("pkg", "machine")
 
 type State   byte
 type Command byte
 
 type (
-	WSChan struct {
+	Machine struct {
+		URL		string
+		Headers	http.Header
 		Input	<-chan []byte
 		Output	chan<- []byte
 		Status	<-chan Status
@@ -44,6 +46,11 @@ const (
 	USE_BINARY
 )
 
+func init() {
+	// disable the logger by default
+	Log.SetHandler(log15.DiscardHandler())
+}
+
 func (s State) String() string {
 	switch s {
 	case DISCONNECTED:  return "DISCONNECTED"
@@ -64,7 +71,7 @@ func (c Command) String() string {
 	return fmt.Sprintf("UNKNOWN COMMAND %v", c)
 }
 
-func New(url string, headers http.Header) *WSChan {
+func New(url string, headers http.Header) *Machine {
 	inp_ch := make(chan []byte,  8)
 	out_ch := make(chan []byte,  8)
 	sts_ch := make(chan Status,  2)
@@ -329,5 +336,5 @@ func New(url string, headers http.Header) *WSChan {
 		}
 	}()
 
-	return &WSChan{inp_ch, out_ch, sts_ch, cmd_ch}
+	return & Machine{url, headers, inp_ch, out_ch, sts_ch, cmd_ch}
 }
