@@ -6,50 +6,76 @@ import (
 	"errors"
 	"net/http"
 	ws "github.com/gorilla/websocket"
+	"github.com/aglyzov/log15"
 )
+
+var Log = log15.New("pkg", "wschan")
+type State   byte
+type Command byte
 
 type (
 	WSChan struct {
 		Input	<-chan []byte
 		Output	chan<- []byte
 		Status	<-chan Status
-		Command	chan<- byte
+		Command	chan<- Command
 	}
 	Status struct {
-		State	byte
+		State	State
 		Error	error
 	}
 )
 
 const (
 	// states
-	DISCONNECTED byte = iota
+	DISCONNECTED State = iota
 	CONNECTING
 	CONNECTED
 	WAITING
 )
 const (
 	// commands
-	QUIT       byte = 16 + iota
+	QUIT       Command = 16 + iota
 	PING
 	USE_TEXT
 	USE_BINARY
 )
 
+func (s State) String() string {
+	switch s {
+	case DISCONNECTED:  return "DISCONNECTED"
+	case CONNECTING:    return "CONNECTING"
+	case CONNECTED:     return "CONNECTED"
+	case WAITING:       return "WAITING"
+	}
+	return fmt.Sprintf("UNKNOWN STATUS %v", s)
+}
+
+func (c Command) String() string {
+	switch c {
+	case QUIT:        return "QUIT"
+	case PING:        return "PING"
+	case USE_TEXT:    return "USE_TEXT"
+	case USE_BINARY:  return "USE_BINARY"
+	}
+	return fmt.Sprintf("UNKNOWN COMMAND %v", c)
+}
+
 func New(url string, headers http.Header) *WSChan {
-	inp_ch := make(chan []byte, 8)
-	out_ch := make(chan []byte, 8)
-	sts_ch := make(chan Status, 2)
-	cmd_ch := make(chan byte,   2)
+	inp_ch := make(chan []byte,  8)
+	out_ch := make(chan []byte,  8)
+	sts_ch := make(chan Status,  2)
+	cmd_ch := make(chan Command, 2)
 
 	con_return_ch := make(chan *ws.Conn, 1)
 	con_cancel_ch := make(chan bool,     1)
 
-	r_error_ch    := make(chan error, 1)
-	w_error_ch    := make(chan error, 1)
-	w_control_ch  := make(chan byte,  1)
+	r_error_ch    := make(chan error,    1)
+	w_error_ch    := make(chan error,    1)
+	w_control_ch  := make(chan Command,  1)
 
-	io_event_ch   := make(chan bool, 2)
+	io_event_ch   := make(chan bool,     2)
+
 
 	connect := func() {
 		for {
