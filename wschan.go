@@ -268,17 +268,19 @@ func New(url string, headers http.Header) *WSChan {
 				if conn == nil {
 					break main_loop
 				}
-				reading = true; go read(conn)
-				writing = true; go write(conn, msg_type)
 				Log.Debug("connected", "local", conn.LocalAddr(), "remote", conn.RemoteAddr())
+				reading = true
+				writing = true
+				go read(conn)
+				go write(conn, msg_type)
 
 			case err := <-r_error_ch:
 				reading = false
 				if writing {
 					// write goroutine is still active
-					sts_ch <- Status{DISCONNECTED, err}
 					Log.Debug("read error -> stopping write")
 					w_control_ch <- QUIT  // ask write to exit
+					sts_ch <- Status{DISCONNECTED, err}
 				} else {
 					// both read and write goroutines have exited
 					Log.Debug("read error -> starting connect()")
@@ -293,12 +295,12 @@ func New(url string, headers http.Header) *WSChan {
 				writing = false
 				if reading {
 					// read goroutine is still active
-					sts_ch <- Status{DISCONNECTED, err}
 					Log.Debug("write error -> stopping read")
 					if conn != nil {
 						conn.Close()  // this also makes read to exit
 						conn = nil
 					}
+					sts_ch <- Status{DISCONNECTED, err}
 				} else {
 					// both read and write goroutines have exited
 					Log.Debug("write error -> starting connect()")
