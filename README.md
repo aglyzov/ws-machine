@@ -78,5 +78,5 @@ func main() {
 }
 ```
 
-See more [examples](http://github.com/aglyzov/wschan/tree/master/examples).
+See more [examples](http://github.com/aglyzov/ws-machine/tree/master/examples).
 
